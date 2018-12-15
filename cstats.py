@@ -16,14 +16,12 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 #
-
-
 from datetime import date
 import traceback
 import gzip
 import struct
 import sys
-
+import re
 
 class CStats(object):
     ID_V0 = 0x30305352
@@ -38,91 +36,65 @@ class CStats(object):
     HOURS = 24
     MINUTES = 60
     MAX_SPEED = HOURS * MINUTES / PER_MINUTE
+    LOG = ""
 
     def __init__(self, filename):
         try:
-            print(">>>>>>>>>> Tomato USB CSTATS <<<<<<<<<<")
             with gzip.open(filename, 'rb') as fileHandle:
                 self.fileContent = fileHandle.read()
             self.index = 0
             self.size = len(self.fileContent)
             self.records = self.size / CStats.RECORD_SIZE
-            print("File size: {0}".format(self.size))
-            print("Number of records: {0}".format(self.records))
         except IOError:
             sys.stderr.write("Can NOT read file: "+filename)
             traceback.print_exc()
 
     def dump(self):
-        for i in range(self.records):
-            print("Record Number:{0}".format(i))
+        for i in range(int(self.records)):
             self.dump_record()
-
-        # check if all bytes are read
-        if self.index == self.size:
-            print("All bytes read")
-        else:
-            print(">>> Warning!")
-            print("Read {0} bytes.".format(self.index))
-            print("Expected to read {0} bytes.".format(self.size))
-            print("Left to read {0} bytes".format(self.size - self.index))
 
     def dump_record(self):
         current = self.index
-
-        print("========== IP Address: {0} ==========".format(self.get_value(16)))
-        version = self.unpack_value("Q", 8)
-        print("Version {0}".format(version))
-        if version == CStats.ID_V0:
-            print("Version ID_V0")
-        elif version == CStats.ID_V1:
-            print("Version ID_V1")
-        elif version == CStats.ID_V2:
-            print("Version ID_V2")
-        else:
-            print("Version UNKNOWN")
-
-        print("---------- Daily ----------")
-        self.dump_stats(CStats.DAY_COUNT)
-        print("dailyp: {0}".format(self.unpack_value("q", 8)))
-
-        print("---------- Monthly ----------")
-        self.dump_stats(CStats.MONTH_COUNT)
-        print("monthlyp: {0}".format(self.unpack_value("q", 8)))
-
-        print("utime: {0}".format(self.unpack_value("q", 8)))
-        print("tail: {0}".format(self.unpack_value("q", 8)))
-
-        print("---------- RX/TX Speed ----------")
+        ip = self.get_value(16).decode('utf-8').replace('\x00', '')
+        #aa=re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$",ip)
+        #print(aa)
+        self.unpack_value("Q", 8)
+        self.dump_stats(CStats.DAY_COUNT,ip,"daily")
+        self.unpack_value("q", 8)
+        self.dump_stats(CStats.MONTH_COUNT,ip,"monthly")
+        self.unpack_value("q", 8)
+        self.unpack_value("q", 8)
+        self.unpack_value("q", 8)
         self.dump_speed(CStats.MAX_SPEED)
-        print("last1: {0}".format(self.unpack_value("Q", 8)))
-        print("last2: {0}".format(self.unpack_value("Q", 8)))
-        print("sync: {0}".format(self.unpack_value("q", 8)))
+        self.unpack_value("Q", 8)
+        self.unpack_value("Q", 8)
+        self.unpack_value("q", 8)
 
         # check if all record bytes are read
         if current + CStats.RECORD_SIZE == self.index:
-            print("All record bytes read")
+            LOG = "All record bytes read"
         else:
-            print(">>> Warning!")
-            print("Read {0} bytes.".format(self.index - current))
-            print("Expected to read {0} bytes.".format(CStats.RECORD_SIZE))
-            print("Left to read {0} bytes".format(self.index - current - CStats.RECORD_SIZE))
+            LOG += ">>> Warning!"
+            LOG += "Read {0} bytes.".format(self.index - current)
+            LOG += "Expected to read {0} bytes.".format(CStats.RECORD_SIZE)
+            LOG += "Left to read {0} bytes".format(self.index - current - CStats.RECORD_SIZE)
 
     def dump_speed(self, size):
-        print("Time,RX bytes,TX bytes")
-        for i in range(size):
+        
+        for i in range(int(size)):
             rx = self.unpack_value("Q", 8)
             tx = self.unpack_value("Q", 8)
             time = i * CStats.PER_MINUTE
-            print("{0:02d}:{1:02d},{2},{3}".format(time / CStats.MINUTES, time % CStats.MINUTES, rx, tx))
+            #print("{0:02d}:{1:02d},{2},{3}".format(time / CStats.MINUTES, time % CStats.MINUTES, rx, tx))
 
-    def dump_stats(self, size):
-        print("Date (yyyy/mm/dd),Down (bytes),Up (bytes)")
-        for i in range(size):
+    def dump_stats(self, size,ip,stat):
+        
+        for i in range(int(size)):
             time = self.unpack_value("Q", 8)
             down = self.unpack_value("Q", 8)
             up = self.unpack_value("Q", 8)
-            print("{0},{1},{2}".format(self.get_date(time).strftime("%Y/%m/%d"), down, up))
+            if down != 0 and up != 0:
+                print("{0},{1},{2},{3},{4}".format(ip,stat,self.get_date(time).strftime("%Y/%m/%d"), 0.000001*down, 0.000001*up))
 
     def unpack_value(self, unpack_type, size):
         value, = struct.unpack(unpack_type, self.get_value(size))
